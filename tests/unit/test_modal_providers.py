@@ -1,5 +1,6 @@
 """Unit tests for Modal RPC providers."""
 
+import sys
 from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -129,9 +130,11 @@ def test_ensure_modal_credentials_missing(monkeypatch: pytest.MonkeyPatch) -> No
 
     fake_config = MagicMock()
     fake_config.get.return_value = None
+    fake_modal_config_module = MagicMock()
+    fake_modal_config_module.config = fake_config
 
     with (
-        patch("modal.config.config", fake_config),
+        patch.dict(sys.modules, {"modal.config": fake_modal_config_module}),
         pytest.raises(RuntimeError, match="Modal credentials are missing"),
     ):
         ensure_modal_credentials()
