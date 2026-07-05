@@ -1,0 +1,57 @@
+[tool.poetry]
+name = "aiagentrag"
+version = "0.0.0"
+description = "Reusable AI Agent library with RAG, streaming, and long-term memory"
+authors = ["leonidsliusar <loslyusar@gmail.com>"]
+readme = "README.md"
+packages = [{ include = "aiagentrag", from = "src" }]
+
+[tool.poetry.scripts]
+aiagentrag-migrate = "aiagentrag.storage.postgres.cli:main"
+
+[tool.poetry.dependencies]
+python = "^3.13"
+pydantic = "^2.10.0"
+sqlalchemy = { version = "^2.0.36", extras = ["asyncio"] }
+asyncpg = "^0.30.0"
+qdrant-client = "^1.12.0"
+httpx = "^0.28.0"
+openai = "^1.57.0"
+ollama = "^0.4.0"
+dishka = "^1.4.0"
+alembic = "^1.14.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.0"
+pytest-asyncio = "^0.24.0"
+ruff = "^0.8.0"
+mypy = "^1.13.0"
+greenlet = "^3.1.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "A", "SIM", "TCH"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+packages = ["aiagentrag"]
+
+[[tool.mypy.overrides]]
+module = ["qdrant_client.*", "ollama.*"]
+ignore_missing_imports = true
