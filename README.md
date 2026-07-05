@@ -101,6 +101,8 @@ Used when the corresponding flag is not passed:
 | `OPENAI_API_KEY` | — (required for `--provider openai`) |
 | `OPENAI_MODEL` | `gpt-4o-mini` |
 | `OPENAI_EMBED_MODEL` | `text-embedding-3-small` |
+| `MODAL_TOKEN_ID` | — (required unless set in `~/.modal.toml`) |
+| `MODAL_TOKEN_SECRET` | — (required unless set in `~/.modal.toml`) |
 | `MODAL_APP_NAME` | — (required for `--provider modal`) |
 | `MODAL_ENVIRONMENT` | — (optional Modal environment) |
 | `MODAL_LLM_CLS` | — (Modal class with `complete` / `stream` methods) |
@@ -128,19 +130,70 @@ poetry run python -m scripts.try_agent \
 # OpenAI
 export OPENAI_API_KEY=sk-...
 poetry run python -m scripts.try_agent --provider openai -m "Hello"
+```
 
-# Modal RPC (deploy your app first — see scripts/modal_llm_service.py)
-export MODAL_APP_NAME=aiagentrag-llm
-export MODAL_LLM_CLS=LLMService
+### Modal RPC (full setup)
+
+Modal calls your **deployed** app over RPC. You need **credentials**, a **deployed app**, and **target names**.
+
+#### Step 1 — Modal account and token
+
+1. Register at [modal.com](https://modal.com).
+2. Create an API token at [modal.com/settings](https://modal.com/settings).
+
+#### Step 2 — Authenticate locally (pick one)
+
+**Option A — CLI** (writes `~/.modal.toml`):
+
+```bash
+pip install modal
+modal token set --token-id ak-... --token-secret as-...
+```
+
+**Option B — environment variables** (CI, Docker, no config file):
+
+```bash
+export MODAL_TOKEN_ID=ak-...
+export MODAL_TOKEN_SECRET=as-...
+```
+
+Verify:
+
+```bash
+modal profile current
+```
+
+#### Step 3 — Deploy the LLM service on Modal
+
+Uses the same credentials as above:
+
+```bash
+poetry install --extras modal
+modal deploy scripts/modal_llm_service.py
+```
+
+This deploys app `aiagentrag-llm` with class `LLMService`. Replace method bodies in that file with your real inference code.
+
+#### Step 4 — Run the agent (local machine or server)
+
+Still needs PostgreSQL, Qdrant, and vectorizer data — only LLM/embeddings go through Modal RPC:
+
+```bash
+export MODAL_TOKEN_ID=ak-...          # skip if already in ~/.modal.toml
+export MODAL_TOKEN_SECRET=as-...      # skip if already in ~/.modal.toml
+export MODAL_APP_NAME=aiagentrag-llm  # must match deployed app name
+export MODAL_LLM_CLS=LLMService       # must match @app.cls class name
+
 poetry run python -m scripts.try_agent --provider modal -m "Hello"
 ```
 
-### Modal RPC contract
+If credentials are missing, the script fails immediately with a clear error (before any RPC call).
 
-Modal is used as **RPC** to your deployed app — not as HTTP and not via Ollama.
+#### Modal RPC contract
 
-1. Deploy a Modal app with LLM + embedding endpoints (example: [`scripts/modal_llm_service.py`](scripts/modal_llm_service.py)).
-2. Point the agent at it with env vars above.
+Modal is used as **RPC** to your deployed app — not HTTP, not Ollama.
+
+Your deployed Modal app must expose these RPC endpoints (see [`scripts/modal_llm_service.py`](scripts/modal_llm_service.py)).
 
 **Class-based** (typical for GPU models with `@modal.cls`):
 
@@ -341,4 +394,5 @@ In-memory test fakes live in `tests/conftest.py` only — not used for local run
 | `connection refused` on :5432 / :6333 | `docker compose up -d` |
 | Ollama streaming / embedding failed | `ollama serve`, `ollama pull nomic-embed-text`, `ollama pull qwen3:8b` |
 | Poor RAG quality | Same embedding vectors as used when ingesting documents |
-| Modal RPC failed | `modal setup`, app deployed, `MODAL_APP_NAME` matches deployed app |
+| Modal RPC failed | Credentials set (`modal token set` or `MODAL_TOKEN_*`), app deployed (`modal deploy`) |
+| `Token missing` | Set `MODAL_TOKEN_ID` + `MODAL_TOKEN_SECRET` or run `modal token set` |

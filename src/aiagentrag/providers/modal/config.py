@@ -1,8 +1,40 @@
 """Configuration for Modal RPC targets."""
 
-from typing import Self
+import os
+from typing import Any, Self, cast
 
 from pydantic import BaseModel, ConfigDict, model_validator
+
+
+def ensure_modal_credentials() -> None:
+    """Verify Modal API credentials are configured before RPC calls."""
+    token_id = os.environ.get("MODAL_TOKEN_ID")
+    token_secret = os.environ.get("MODAL_TOKEN_SECRET")
+
+    if not token_id or not token_secret:
+        try:
+            from modal.config import config as modal_config
+
+            modal_settings = cast(Any, modal_config)
+            token_id = token_id or cast(str | None, modal_settings.get("token_id"))
+            token_secret = token_secret or cast(str | None, modal_settings.get("token_secret"))
+        except ImportError as exc:
+            msg = "Modal SDK is not installed. Install with: pip install 'aiagentrag[modal]'"
+            raise RuntimeError(msg) from exc
+
+    if token_id and token_secret:
+        return
+
+    msg = (
+        "Modal credentials are missing. RPC calls require authentication.\n"
+        "Option A — CLI (writes ~/.modal.toml):\n"
+        "  modal token set --token-id ak-... --token-secret as-...\n"
+        "Option B — environment variables:\n"
+        "  export MODAL_TOKEN_ID=ak-...\n"
+        "  export MODAL_TOKEN_SECRET=as-...\n"
+        "Create tokens at https://modal.com/settings"
+    )
+    raise RuntimeError(msg)
 
 
 class ModalRpcConfig(BaseModel):
@@ -65,7 +97,7 @@ class ModalRpcConfig(BaseModel):
 
 def modal_config_from_env() -> ModalRpcConfig:
     """Build Modal RPC config from standard environment variables."""
-    import os
+    ensure_modal_credentials()
 
     app_name = os.environ.get("MODAL_APP_NAME")
     if not app_name:

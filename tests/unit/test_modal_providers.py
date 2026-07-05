@@ -7,7 +7,11 @@ import pytest
 
 from aiagentrag.core.exceptions import LLMError
 from aiagentrag.core.models import LLMMessage
-from aiagentrag.providers.modal.config import ModalRpcConfig
+from aiagentrag.providers.modal.config import (
+    ModalRpcConfig,
+    ensure_modal_credentials,
+    modal_config_from_env,
+)
 from aiagentrag.providers.modal.embeddings import ModalEmbeddingProvider
 from aiagentrag.providers.modal.llm import ModalLLMProvider
 from aiagentrag.providers.modal.rpc import ModalRpcClient
@@ -106,6 +110,38 @@ async def test_modal_rpc_client_calls_function_remote() -> None:
         environment_name="main",
     )
     fake_function.remote.assert_awaited_once()
+
+
+async def test_modal_config_from_env_requires_app_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Should require MODAL_APP_NAME after credentials are present."""
+    monkeypatch.setenv("MODAL_TOKEN_ID", "ak-test")
+    monkeypatch.setenv("MODAL_TOKEN_SECRET", "as-test")
+    monkeypatch.delenv("MODAL_APP_NAME", raising=False)
+
+    with pytest.raises(RuntimeError, match="MODAL_APP_NAME"):
+        modal_config_from_env()
+
+
+def test_ensure_modal_credentials_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Should fail fast when neither env vars nor config file provide tokens."""
+    monkeypatch.delenv("MODAL_TOKEN_ID", raising=False)
+    monkeypatch.delenv("MODAL_TOKEN_SECRET", raising=False)
+
+    fake_config = MagicMock()
+    fake_config.get.return_value = None
+
+    with (
+        patch("modal.config.config", fake_config),
+        pytest.raises(RuntimeError, match="Modal credentials are missing"),
+    ):
+        ensure_modal_credentials()
+
+
+def test_ensure_modal_credentials_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Should accept credentials from environment variables."""
+    monkeypatch.setenv("MODAL_TOKEN_ID", "ak-test")
+    monkeypatch.setenv("MODAL_TOKEN_SECRET", "as-test")
+    ensure_modal_credentials()
 
 
 async def test_modal_rpc_missing_sdk_raises_llm_error() -> None:
