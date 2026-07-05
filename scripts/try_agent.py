@@ -44,7 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the AI agent with real infrastructure.")
     parser.add_argument(
         "--provider",
-        choices=["ollama", "openai"],
+        choices=["ollama", "openai", "modal"],
         default="ollama",
         help="LLM provider (default: ollama)",
     )
@@ -85,7 +85,20 @@ async def build_agent(
     knowledge_collection: str,
 ) -> Agent:
     """Build an agent wired to PostgreSQL, Qdrant, and the selected LLM provider."""
-    if provider == "ollama":
+    if provider == "modal":
+        from aiagentrag.providers.modal.config import modal_config_from_env
+        from aiagentrag.providers.modal.embeddings import ModalEmbeddingProvider
+        from aiagentrag.providers.modal.llm import ModalLLMProvider
+        from aiagentrag.providers.modal.rpc import ModalRpcClient
+
+        modal_config = modal_config_from_env()
+        rpc = ModalRpcClient(
+            modal_config.app_name,
+            environment_name=modal_config.environment_name,
+        )
+        llm = ModalLLMProvider(rpc, modal_config)
+        embedding = ModalEmbeddingProvider(rpc, modal_config)
+    elif provider == "ollama":
         import ollama
 
         from aiagentrag.providers.ollama.embeddings import OllamaEmbeddingProvider

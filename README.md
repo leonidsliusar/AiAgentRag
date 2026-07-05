@@ -15,13 +15,14 @@ The library does **not** start external services. You need:
 |---------|---------|---------------|
 | **PostgreSQL** | Conversation history | `docker compose up -d` in this repo, or your own instance |
 | **Qdrant** | RAG + long-term memory | `docker compose up -d` in this repo, or your own instance |
-| **LLM + embeddings** | Generation and vectorization | **Ollama** (local) or **OpenAI API** |
+| **LLM + embeddings** | Generation and vectorization | **Ollama**, **OpenAI API**, or **Modal RPC** |
 
 For RAG:
 
 - **`documents`** collection in Qdrant — created and populated by **vectorizer** (the agent is read-only).
 - **`user_memory`** collection — created automatically by the agent.
-- Embedding model must match vectorizer: **`nomic-embed-text`** (Ollama).
+- With Ollama: embedding model must match vectorizer (`nomic-embed-text`).
+- With Modal: your deployed Modal app must expose compatible `embed` RPC (see below).
 
 Python **3.13+**.
 
@@ -33,10 +34,12 @@ Python **3.13+**.
 
 ```bash
 pip install aiagentrag
+pip install "aiagentrag[modal]"   # Modal RPC provider
 ```
 
 ```bash
 poetry add aiagentrag
+poetry add aiagentrag --extras modal
 ```
 
 ### From source (development)
@@ -77,7 +80,7 @@ PostgreSQL migrations run automatically inside the script — no manual step req
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-m`, `--message` | — | **Required.** User message |
-| `--provider` | `ollama` | `ollama` or `openai` |
+| `--provider` | `ollama` | `ollama`, `openai`, or `modal` |
 | `--user-id` | `local-user` | User identifier |
 | `--database-url` | see below | PostgreSQL URL |
 | `--qdrant-url` | see below | Qdrant URL |
@@ -98,6 +101,16 @@ Used when the corresponding flag is not passed:
 | `OPENAI_API_KEY` | — (required for `--provider openai`) |
 | `OPENAI_MODEL` | `gpt-4o-mini` |
 | `OPENAI_EMBED_MODEL` | `text-embedding-3-small` |
+| `MODAL_APP_NAME` | — (required for `--provider modal`) |
+| `MODAL_ENVIRONMENT` | — (optional Modal environment) |
+| `MODAL_LLM_CLS` | — (Modal class with `complete` / `stream` methods) |
+| `MODAL_LLM_COMPLETE_METHOD` | `complete` |
+| `MODAL_LLM_STREAM_METHOD` | `stream` |
+| `MODAL_EMBED_CLS` | same as `MODAL_LLM_CLS` |
+| `MODAL_EMBED_METHOD` | `embed` |
+| `MODAL_LLM_COMPLETE_FUNCTION` | — (alternative to class: deployed Function name) |
+| `MODAL_LLM_STREAM_FUNCTION` | — |
+| `MODAL_EMBED_FUNCTION` | — |
 
 ### Examples
 
@@ -115,6 +128,39 @@ poetry run python -m scripts.try_agent \
 # OpenAI
 export OPENAI_API_KEY=sk-...
 poetry run python -m scripts.try_agent --provider openai -m "Hello"
+
+# Modal RPC (deploy your app first — see scripts/modal_llm_service.py)
+export MODAL_APP_NAME=aiagentrag-llm
+export MODAL_LLM_CLS=LLMService
+poetry run python -m scripts.try_agent --provider modal -m "Hello"
+```
+
+### Modal RPC contract
+
+Modal is used as **RPC** to your deployed app — not as HTTP and not via Ollama.
+
+1. Deploy a Modal app with LLM + embedding endpoints (example: [`scripts/modal_llm_service.py`](scripts/modal_llm_service.py)).
+2. Point the agent at it with env vars above.
+
+**Class-based** (typical for GPU models with `@modal.cls`):
+
+| Method | Input | Output |
+|--------|-------|--------|
+| `complete` | `list[dict]` with `role`, `content` | `str` (or `{"content": "..."}`) |
+| `stream` | same | generator yielding `str` tokens |
+| `embed` | `list[str]` | `list[list[float]]` |
+
+**Function-based** alternative: set `MODAL_LLM_COMPLETE_FUNCTION`, `MODAL_LLM_STREAM_FUNCTION`, `MODAL_EMBED_FUNCTION` instead of `MODAL_LLM_CLS`.
+
+Client-side usage:
+
+```python
+from aiagentrag.providers.modal import ModalRpcClient, ModalRpcConfig, ModalLLMProvider, ModalEmbeddingProvider
+
+config = ModalRpcConfig(app_name="aiagentrag-llm", llm_cls="LLMService", embed_cls="LLMService")
+rpc = ModalRpcClient(config.app_name)
+llm = ModalLLMProvider(rpc, config)
+embedding = ModalEmbeddingProvider(rpc, config)
 ```
 
 ---
@@ -187,7 +233,7 @@ from aiagentrag.prompt.builder import PromptBuilder
 from aiagentrag.storage.postgres import PostgresConversationStore
 from aiagentrag.storage.qdrant.client import QdrantVectorStore
 
-# + your LLM provider (Ollama / OpenAI)
+# + your LLM provider (Ollama / OpenAI / Modal RPC)
 # + QdrantVectorStore, embedding provider
 
 
@@ -270,8 +316,10 @@ git clone https://github.com/leonidsliusar/AIAgentRag
 cd AIAgentRag
 poetry install
 
+poetry install --extras modal
+
 docker compose up -d    # PostgreSQL + Qdrant
-# Ollama — local; documents — via vectorizer
+# LLM: Ollama, OpenAI, or Modal RPC; documents via vectorizer
 
 poetry run python -m scripts.try_agent -m "test"
 
@@ -292,4 +340,5 @@ In-memory test fakes live in `tests/conftest.py` only — not used for local run
 | `Knowledge collection 'documents' was not found` | Ingest documents via vectorizer first |
 | `connection refused` on :5432 / :6333 | `docker compose up -d` |
 | Ollama streaming / embedding failed | `ollama serve`, `ollama pull nomic-embed-text`, `ollama pull qwen3:8b` |
-| Poor RAG quality | Same embedding model as vectorizer (`nomic-embed-text`) |
+| Poor RAG quality | Same embedding vectors as used when ingesting documents |
+| Modal RPC failed | `modal setup`, app deployed, `MODAL_APP_NAME` matches deployed app |
