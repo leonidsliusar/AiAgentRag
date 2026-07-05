@@ -1,24 +1,45 @@
 # AIAgentRag
 
-Reusable Python library: AI agent with RAG, streaming responses, and long-term memory.
+Python library for an AI agent with RAG, streaming responses, and long-term memory.  
+Transport-independent — wire it into Telegram, FastAPI, CLI, or anything else on your side.
 
-Transport-independent — connect to Telegram, FastAPI, Discord, CLI, etc.  
-**Works with [vectorizer](https://github.com/leonidsliusar/vectorizer)**: load documents into Qdrant via vectorizer, run this agent against the same Qdrant — RAG works immediately.
+Compatible with [vectorizer](https://github.com/leonidsliusar/vectorizer): load documents into Qdrant via vectorizer; the agent reads the same `documents` collection.
 
-## Local run (step by step)
+---
 
-Everything below assumes you are in the project root after `poetry install`.
+## 1. Dependencies
 
-### What you need running
+The library does **not** start external services. You need:
 
-| Service | Port | How to start |
-|---------|------|--------------|
-| PostgreSQL | 5432 | `docker compose up -d` (included) |
-| Qdrant | 6333 | `docker compose up -d` (included) |
-| Ollama | 11434 | Already on your machine (same as vectorizer), or `docker compose --profile ollama up -d` |
-| vectorizer data | — | Documents already loaded into Qdrant collection `documents` |
+| Service | Purpose | Typical setup |
+|---------|---------|---------------|
+| **PostgreSQL** | Conversation history | `docker compose up -d` in this repo, or your own instance |
+| **Qdrant** | RAG + long-term memory | `docker compose up -d` in this repo, or your own instance |
+| **LLM + embeddings** | Generation and vectorization | **Ollama** (local) or **OpenAI API** |
 
-### Step 1 — Install
+For RAG:
+
+- **`documents`** collection in Qdrant — created and populated by **vectorizer** (the agent is read-only).
+- **`user_memory`** collection — created automatically by the agent.
+- Embedding model must match vectorizer: **`nomic-embed-text`** (Ollama).
+
+Python **3.13+**.
+
+---
+
+## 2. Installation
+
+### From PyPI
+
+```bash
+pip install aiagentrag
+```
+
+```bash
+poetry add aiagentrag
+```
+
+### From source (development)
 
 ```bash
 git clone https://github.com/leonidsliusar/AIAgentRag
@@ -26,226 +47,249 @@ cd AIAgentRag
 poetry install
 ```
 
-### Step 2 — Start PostgreSQL and Qdrant
+---
+
+## 3. Local script (`scripts/try_agent`)
+
+Script to test the agent against real infrastructure. Lives in this repository only — not shipped on PyPI.
+
+### One-time setup
 
 ```bash
-docker compose up -d
-```
-
-Docker Compose creates database `aiagentrag` automatically (`postgres` / `postgres`).
-
-Check that services are up:
-
-```bash
-docker compose ps
-curl -s http://localhost:6333/readyz
-```
-
-### Step 3 — Ollama models
-
-Use the same Ollama instance as vectorizer. Pull models if missing:
-
-```bash
-ollama pull nomic-embed-text   # embeddings — must match vectorizer
+docker compose up -d          # PostgreSQL :5432 + Qdrant :6333
+ollama pull nomic-embed-text  # embeddings (same as vectorizer)
 ollama pull qwen3:8b          # chat model (or set OLLAMA_MODEL)
+# ingest documents into Qdrant via vectorizer (collection: documents)
 ```
 
-### Step 4 — Load documents via vectorizer
+### Run
 
-In you ingest documents into Qdrant (collection `documents`, embedding `nomic-embed-text`) before.
-
-AIAgentRag reads that collection and **does not create or overwrite it**.  
-If `documents` is empty or missing, the agent will fail with a clear error.
-
-Verify collection exists:
+From the repository root:
 
 ```bash
-curl -s http://localhost:6333/collections/documents | head
+poetry run python -m scripts.try_agent -m "Your question"
 ```
 
-### Step 5 — Run the agent
+PostgreSQL migrations run automatically inside the script — no manual step required.
 
-One command (migrations run automatically inside the script):
+### Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-m`, `--message` | — | **Required.** User message |
+| `--provider` | `ollama` | `ollama` or `openai` |
+| `--user-id` | `local-user` | User identifier |
+| `--database-url` | see below | PostgreSQL URL |
+| `--qdrant-url` | see below | Qdrant URL |
+| `--knowledge-collection` | see below | Document collection (vectorizer) |
+
+### Environment variables
+
+Used when the corresponding flag is not passed:
+
+| Variable | Default |
+|----------|---------|
+| `DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5432/aiagentrag` |
+| `QDRANT_URL` | `http://localhost:6333` |
+| `QDRANT_COLLECTION` | `documents` |
+| `OLLAMA_HOST` | `http://localhost:11434` |
+| `OLLAMA_MODEL` | `qwen3:8b` |
+| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` |
+| `OPENAI_API_KEY` | — (required for `--provider openai`) |
+| `OPENAI_MODEL` | `gpt-4o-mini` |
+| `OPENAI_EMBED_MODEL` | `text-embedding-3-small` |
+
+### Examples
 
 ```bash
-poetry run python -m scripts.try_agent -m "<YOUR QUESTION HERE>"
-```
+# minimal run
+poetry run python -m scripts.try_agent -m "What do the documents say about X?"
 
-Defaults match Docker Compose and vectorizer:
-
-- PostgreSQL: `postgresql+asyncpg://postgres:postgres@localhost:5432/aiagentrag`
-- Qdrant: `http://localhost:6333`
-- Collection: `documents`
-- Ollama: `http://localhost:11434`
-
-Expected output:
-
-```
-User (local-user): Ваш вопрос...
-
-[Loading history]
-[Retrieving memory]
-[Retrieving knowledge]
-[Building prompt]
-[Calling LLM]
-Agent: ... streamed answer ...
-
-Done. Messages in context: 2, memories: 0, knowledge: 3
-```
-
-### Optional flags
-
-```bash
+# explicit URLs
 poetry run python -m scripts.try_agent \
-  -m "Hello!" \
-  --user-id my-user \
-  --knowledge-collection documents \
+  -m "Hello" \
   --database-url "postgresql+asyncpg://postgres:postgres@localhost:5432/aiagentrag" \
-  --qdrant-url "http://localhost:6333"
-```
+  --qdrant-url "http://localhost:6333" \
+  --knowledge-collection documents
 
-OpenAI instead of Ollama:
-
-```bash
+# OpenAI
 export OPENAI_API_KEY=sk-...
 poetry run python -m scripts.try_agent --provider openai -m "Hello"
 ```
 
-### Environment variables (all optional if defaults fit)
-
-```bash
-export DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/aiagentrag"
-export QDRANT_URL="http://localhost:6333"
-export QDRANT_COLLECTION="documents"
-export OLLAMA_HOST="http://localhost:11434"
-export OLLAMA_MODEL="llama3.2"
-export OLLAMA_EMBED_MODEL="nomic-embed-text"
-```
-
-| Flag | Default |
-|------|---------|
-| `--provider` | `ollama` |
-| `--message`, `-m` | **required** |
-| `--user-id` | `local-user` |
-| `--database-url` | `DATABASE_URL` or postgres default |
-| `--qdrant-url` | `QDRANT_URL` or `http://localhost:6333` |
-| `--knowledge-collection` | `QDRANT_COLLECTION` or `documents` |
-
 ---
 
-## Features
+## 4. PostgreSQL migrations
 
-- Streaming LLM with events: `StatusEvent`, `TokenEvent`, `FinishedEvent`, `ErrorEvent`
-- RAG from Qdrant collection `documents` (vectorizer-compatible schema)
-- Long-term user memory in Qdrant collection `user_memory`
-- Conversation compression
-- Providers: OpenAI, Ollama
-- Storage: PostgreSQL + Qdrant
-- Embedded PostgreSQL migrations
-- DI via Dishka (`create_container`)
+Migrations are embedded in the package. Consumer projects do **not** need `alembic.ini`, an `alembic/` folder, or manual SQL.
 
-## Requirements
+The PostgreSQL **database** must exist beforehand; the library creates tables.
 
-- Python 3.13+
-- PostgreSQL, Qdrant, Ollama (or OpenAI)
-- Documents in Qdrant (via vectorizer)
-
-## Installation
-
-```bash
-pip install aiagentrag / poetry add aiagentrag  # PyPI
-poetry install                                  # from source
-```
-
-## Architecture
-
-```
-User message
-    → PostgreSQL (recent history)
-    → Qdrant user_memory (long-term memory)
-    → Qdrant documents (RAG chunks from vectorizer)
-    → prompt → LLM stream → save messages → compress old history
-```
-
-| Storage | Collection | Owner | Agent action |
-|---------|------------|-------|--------------|
-| PostgreSQL | `messages` | AIAgentRag | read/write |
-| Qdrant | `documents` | vectorizer | **read only** |
-| Qdrant | `user_memory` | AIAgentRag | read/write (auto-created) |
-
-### vectorizer payload (shared)
-
-| Field | Description |
-|-------|-------------|
-| `text` | Chunk text |
-| `document_id` | Source document |
-| `chunk_index` | Index in document |
-| `chunk_id`, `pages`, `token_count` | optional metadata |
-
-Embedding model must match vectorizer: **`nomic-embed-text`**.
-
-```python
-from aiagentrag import AgentConfig
-
-config = AgentConfig(
-    system_prompt="You are a helpful assistant.",
-    knowledge_collection="documents",  # default
-)
-```
-
-## Database migrations
-
-For **`try_agent`** — migrations run automatically, nothing to do manually.
-
-For your own app:
+### In this repository
 
 ```bash
 export DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/aiagentrag"
 poetry run aiagentrag-migrate upgrade head
 ```
 
-Or in Python:
+Check status:
+
+```bash
+poetry run aiagentrag-migrate current
+poetry run aiagentrag-migrate history
+```
+
+### In a project with the installed package
+
+**CLI** (after `pip install aiagentrag`):
+
+```bash
+export DATABASE_URL="postgresql+asyncpg://user:pass@host:5432/mydb"
+aiagentrag-migrate upgrade head
+aiagentrag-migrate current
+aiagentrag-migrate downgrade base   # rollback
+```
+
+**Python API:**
 
 ```python
-from aiagentrag.storage.postgres import PostgresConversationStore
+from aiagentrag.storage.postgres import upgrade_head, PostgresConversationStore
 
+DATABASE_URL = "postgresql+asyncpg://user:pass@host:5432/mydb"
+
+# migrations only
+upgrade_head(DATABASE_URL)
+
+# migrations + ready-to-use store
 store = await PostgresConversationStore.initialize(DATABASE_URL)
 ```
 
-No `alembic.ini` or `alembic/` folder needed in consumer projects.
+`upgrade_head` is idempotent — safe to call on every application startup.
 
-## Public API
+---
+
+## 5. Using the library in your project
+
+The library does not start infrastructure. You connect PostgreSQL, Qdrant, and an LLM provider, build an `Agent`, and call `run()`.
+
+Full wiring example: [`scripts/try_agent.py`](scripts/try_agent.py).
+
+Minimal outline:
 
 ```python
-from aiagentrag import Agent, AgentConfig, TokenEvent, FinishedEvent
+import asyncio
 
-async for event in agent.run(user_id="user-1", message="Hello"):
-    match event:
-        case TokenEvent(content=token):
-            print(token, end="", flush=True)
-        case FinishedEvent(metadata=meta):
-            print(meta.knowledge_chunks_retrieved)
+from aiagentrag import Agent, AgentConfig, TokenEvent, FinishedEvent, ErrorEvent
+from aiagentrag.knowledge.retriever import KnowledgeRetriever
+from aiagentrag.memory.compressor import ConversationCompressor
+from aiagentrag.memory.repository import MemoryRepository
+from aiagentrag.prompt.builder import PromptBuilder
+from aiagentrag.storage.postgres import PostgresConversationStore
+from aiagentrag.storage.qdrant.client import QdrantVectorStore
+
+# + your LLM provider (Ollama / OpenAI)
+# + QdrantVectorStore, embedding provider
+
+
+async def main() -> None:
+    config = AgentConfig(
+        system_prompt="You are a helpful assistant.",
+        knowledge_collection="documents",  # vectorizer collection
+    )
+
+    database_url = "postgresql+asyncpg://postgres:postgres@localhost:5432/mydb"
+    conversation_store = await PostgresConversationStore.initialize(database_url)
+
+    # vector_store, embedding, llm — see scripts/try_agent.py
+
+    agent = Agent(
+        config=config,
+        memory_repository=MemoryRepository(conversation_store, vector_store, embedding, config),
+        knowledge_retriever=KnowledgeRetriever(vector_store, embedding, config),
+        prompt_builder=PromptBuilder(config),
+        llm_provider=llm,
+        conversation_compressor=ConversationCompressor(
+            conversation_store, vector_store, embedding, llm, config
+        ),
+    )
+
+    async for event in agent.run(user_id="user-1", message="Hello"):
+        match event:
+            case TokenEvent(content=token):
+                print(token, end="", flush=True)
+            case FinishedEvent(metadata=meta):
+                print(f"\nchunks: {meta.knowledge_chunks_retrieved}")
+            case ErrorEvent(error=err):
+                print(f"Error: {err}")
+
+
+asyncio.run(main())
 ```
 
-Full wiring example: `scripts/try_agent.py`.
+### DI (optional)
+
+```python
+from aiagentrag import create_container
+
+container = create_container(
+    config=config,
+    embedding_provider=embedding,
+    llm_provider=llm,
+    database_url=database_url,
+    qdrant_url="http://localhost:6333",
+    vector_size=768,
+)
+```
+
+### Events
+
+`agent.run()` yields an async stream:
+
+| Event | When |
+|-------|------|
+| `StatusEvent` | Pipeline step (load history, RAG, LLM, …) |
+| `TokenEvent` | Streamed response token |
+| `FinishedEvent` | Success + metadata |
+| `ErrorEvent` | Failure |
+
+### Qdrant collections
+
+| Collection | Written by | Read by |
+|------------|------------|---------|
+| `documents` | vectorizer | agent (RAG) |
+| `user_memory` | agent | agent |
+
+Document payload (vectorizer): `text` field plus metadata (`document_id`, `chunk_index`, …).
+
+---
+
+## 6. Local development
+
+```bash
+git clone https://github.com/leonidsliusar/AIAgentRag
+cd AIAgentRag
+poetry install
+
+docker compose up -d    # PostgreSQL + Qdrant
+# Ollama — local; documents — via vectorizer
+
+poetry run python -m scripts.try_agent -m "test"
+
+poetry run pytest
+poetry run ruff check src tests scripts
+poetry run mypy src
+poetry build              # verify migrations are included in the wheel
+```
+
+In-memory test fakes live in `tests/conftest.py` only — not used for local runs.
+
+---
 
 ## Troubleshooting
 
-| Problem | Fix |
-|---------|-----|
-| `Knowledge collection 'documents' was not found` | Run vectorizer ingest first; check `QDRANT_URL` |
-| `connection refused` :5432 | `docker compose up -d` |
-| `connection refused` :6333 | `docker compose up -d` |
-| `Ollama streaming failed` | `ollama serve`, then `ollama pull llama3.2` |
-| `Ollama embedding failed` | `ollama pull nomic-embed-text` |
-| Bad RAG results | Same embed model as vectorizer; re-index if changed |
-
-## Development
-
-```bash
-poetry run ruff check src tests scripts
-poetry run mypy src
-poetry run pytest
-```
-
-Test fakes live in `tests/conftest.py` only — not used for local runs.
+| Error | Fix |
+|-------|-----|
+| `Knowledge collection 'documents' was not found` | Ingest documents via vectorizer first |
+| `connection refused` on :5432 / :6333 | `docker compose up -d` |
+| Ollama streaming / embedding failed | `ollama serve`, `ollama pull nomic-embed-text`, `ollama pull qwen3:8b` |
+| Poor RAG quality | Same embedding model as vectorizer (`nomic-embed-text`) |
