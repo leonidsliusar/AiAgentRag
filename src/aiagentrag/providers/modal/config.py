@@ -15,9 +15,9 @@ def ensure_modal_credentials() -> None:
         try:
             from modal.config import config as modal_config
 
-            modal_settings = cast(Any, modal_config)
-            token_id = token_id or cast(str | None, modal_settings.get("token_id"))
-            token_secret = token_secret or cast(str | None, modal_settings.get("token_secret"))
+            modal_settings = cast("Any", modal_config)
+            token_id = token_id or cast("str | None", modal_settings.get("token_id"))
+            token_secret = token_secret or cast("str | None", modal_settings.get("token_secret"))
         except ImportError as exc:
             msg = "Modal SDK is not installed. Install with: pip install 'aiagentrag[modal]'"
             raise RuntimeError(msg) from exc

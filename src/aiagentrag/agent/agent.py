@@ -126,7 +126,7 @@ class Agent:
             memory_repository=memory_repo,
             knowledge_retriever=knowledge,
             prompt_builder=prompt,
-            llm_provider=llm_provider,  # type: ignore[arg-type]
+            llm_provider=llm_provider,
             conversation_compressor=compressor,
         )
 

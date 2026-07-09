@@ -1,10 +1,12 @@
 """OpenAI LLM provider implementation."""
 
 from collections.abc import AsyncIterator
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from openai import AsyncOpenAI, AsyncStream
-from openai.types.chat import ChatCompletion, ChatCompletionChunk
+
+if TYPE_CHECKING:
+    from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
 from aiagentrag.core.exceptions import LLMError
 from aiagentrag.core.models import LLMMessage
@@ -34,7 +36,7 @@ class OpenAILLMProvider:
                 temperature=self._temperature,
                 stream=True,
             )
-            stream = cast(AsyncStream[ChatCompletionChunk], response)
+            stream = cast("AsyncStream[ChatCompletionChunk]", response)
             async for chunk in stream:
                 delta = chunk.choices[0].delta.content
                 if delta:
@@ -53,7 +55,7 @@ class OpenAILLMProvider:
                 temperature=self._temperature,
                 stream=False,
             )
-            completion = cast(ChatCompletion, response)
+            completion = cast("ChatCompletion", response)
             content = completion.choices[0].message.content
             if content is None:
                 msg = "OpenAI returned empty response"

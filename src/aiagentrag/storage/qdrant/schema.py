@@ -26,6 +26,4 @@ def extract_text(payload: dict[str, object]) -> str:
 
 def extract_metadata(payload: dict[str, object]) -> dict[str, object]:
     """Return payload fields excluding primary text content."""
-    return {
-        key: value for key, value in payload.items() if key not in TEXT_PAYLOAD_KEYS
-    }
+    return {key: value for key, value in payload.items() if key not in TEXT_PAYLOAD_KEYS}

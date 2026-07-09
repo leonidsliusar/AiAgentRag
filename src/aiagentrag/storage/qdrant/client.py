@@ -4,6 +4,7 @@ import uuid
 
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import (
+    Distance,
     FieldCondition,
     Filter,
     MatchValue,
@@ -41,7 +42,7 @@ class QdrantVectorStore:
                     collection_name=collection,
                     vectors_config=VectorParams(
                         size=self._vector_size,
-                        distance="Cosine",
+                        distance=Distance.COSINE,
                     ),
                 )
         except Exception as exc:
@@ -102,11 +103,14 @@ class QdrantVectorStore:
         """Build a Qdrant filter from a payload dictionary."""
         if not filter_payload:
             return None
-        conditions = [
+        conditions: list[FieldCondition] = [
             FieldCondition(key=key, match=MatchValue(value=value))
             for key, value in filter_payload.items()
         ]
-        return Filter(must=conditions)
+        # qdrant-client expects a list[Condition] but mypy treats list as invariant.
+        # Use a narrow, explicit ignore here because the library's type signature
+        # is a complex union of many Condition types that we construct correctly.
+        return Filter(must=conditions)  # type: ignore[arg-type]
 
     @staticmethod
     def _resolve_point_id(point_id: str) -> str | int:
