@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from aiagentrag.core.exceptions import StorageError
 from aiagentrag.core.models import Message, MessageRole
-from aiagentrag.storage.postgres.migration import upgrade_head
 from aiagentrag.storage.postgres.models import MessageRecord
 
 
@@ -21,8 +20,7 @@ class PostgresConversationStore:
 
     @classmethod
     async def initialize(cls, database_url: str) -> Self:
-        """Run migrations and return a ready conversation store."""
-        upgrade_head(database_url)
+        """Return a ready conversation store."""
         engine = create_async_engine(database_url)
         session_factory = async_sessionmaker(engine, expire_on_commit=False)
         return cls(session_factory)

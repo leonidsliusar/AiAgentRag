@@ -14,6 +14,7 @@ from aiagentrag.core.events import (
 from aiagentrag.core.exceptions import AgentError
 from aiagentrag.core.interfaces import (
     ConversationCompressorProtocol,
+    EmbeddingProvider,
     KnowledgeRetrieverProtocol,
     LLMProvider,
     MemoryRepositoryProtocol,
@@ -41,6 +42,161 @@ class Agent:
         self._prompt_builder = prompt_builder
         self._llm_provider = llm_provider
         self._conversation_compressor = conversation_compressor
+
+    @classmethod
+    def from_components(
+        cls,
+        config: AgentConfig,
+        memory_repository: MemoryRepositoryProtocol,
+        knowledge_retriever: KnowledgeRetrieverProtocol,
+        prompt_builder: PromptBuilderProtocol,
+        llm_provider: LLMProvider,
+        conversation_compressor: ConversationCompressorProtocol,
+    ) -> "Agent":
+        """Create an Agent synchronously from already-instantiated components."""
+        return cls(
+            config=config,
+            memory_repository=memory_repository,
+            knowledge_retriever=knowledge_retriever,
+            prompt_builder=prompt_builder,
+            llm_provider=llm_provider,
+            conversation_compressor=conversation_compressor,
+        )
+
+    @classmethod
+    def from_config(
+        cls,
+        config: AgentConfig,
+        *,
+        embedding_provider: EmbeddingProvider,
+        llm_provider: LLMProvider,
+        database_url: str,
+        qdrant_url: str,
+        vector_size: int = 1536,
+    ) -> "Agent":
+        """Convenience constructor that wires default implementations synchronously.
+
+        Important: this constructor does NOT run database migrations. Use the
+        PostgresConversationStore.initialize(...) helper elsewhere when you need
+        migrations to be applied.
+        """
+        # Local imports to avoid heavy dependencies at package import time.
+        from qdrant_client import AsyncQdrantClient
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from aiagentrag.knowledge.retriever import KnowledgeRetriever
+        from aiagentrag.memory.compressor import ConversationCompressor
+        from aiagentrag.memory.repository import MemoryRepository
+        from aiagentrag.prompt.builder import PromptBuilder
+        from aiagentrag.storage.postgres.store import PostgresConversationStore
+        from aiagentrag.storage.qdrant.client import QdrantVectorStore
+
+        # Create async engine and session factory but DO NOT run migrations here.
+        engine = create_async_engine(database_url)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        conversation_store = PostgresConversationStore(session_factory)
+
+        # Create Qdrant client and vector store (synchronous client construction).
+        qdrant_client = AsyncQdrantClient(url=qdrant_url)
+        vector_store = QdrantVectorStore(qdrant_client, vector_size=vector_size)
+
+        # Wire repository and other components.
+        memory_repo = MemoryRepository(
+            conversation_store=conversation_store,
+            vector_store=vector_store,
+            embedding_provider=embedding_provider,
+            config=config,
+        )
+        knowledge = KnowledgeRetriever(
+            vector_store=vector_store,
+            embedding_provider=embedding_provider,
+            config=config,
+        )
+        prompt = PromptBuilder(config)
+        compressor = ConversationCompressor(
+            conversation_store=conversation_store,
+            vector_store=vector_store,
+            embedding_provider=embedding_provider,
+            llm_provider=llm_provider,
+            config=config,
+        )
+
+        return cls.from_components(
+            config=config,
+            memory_repository=memory_repo,
+            knowledge_retriever=knowledge,
+            prompt_builder=prompt,
+            llm_provider=llm_provider,  # type: ignore[arg-type]
+            conversation_compressor=compressor,
+        )
+
+    @classmethod
+    def from_openai(
+        cls,
+        config: AgentConfig,
+        *,
+        openai_client: LLMProvider,
+        embedding_provider: EmbeddingProvider,
+        database_url: str,
+        qdrant_url: str,
+        vector_size: int = 1536,
+    ) -> "Agent":
+        """Create an Agent wired for OpenAI-based providers.
+
+        This is a thin wrapper around `from_config` that accepts an OpenAI client
+        instance for the LLM and reuses the provided embedding provider.
+        """
+        # The openai_client is expected to implement the LLMProvider protocol.
+        return cls.from_config(
+            config,
+            embedding_provider=embedding_provider,
+            llm_provider=openai_client,
+            database_url=database_url,
+            qdrant_url=qdrant_url,
+            vector_size=vector_size,
+        )
+
+    @classmethod
+    def from_ollama(
+        cls,
+        config: AgentConfig,
+        *,
+        ollama_client: LLMProvider,
+        embedding_provider: EmbeddingProvider,
+        database_url: str,
+        qdrant_url: str,
+        vector_size: int = 1536,
+    ) -> "Agent":
+        """Create an Agent wired for Ollama-based providers."""
+        return cls.from_config(
+            config,
+            embedding_provider=embedding_provider,
+            llm_provider=ollama_client,
+            database_url=database_url,
+            qdrant_url=qdrant_url,
+            vector_size=vector_size,
+        )
+
+    @classmethod
+    def from_modal(
+        cls,
+        config: AgentConfig,
+        *,
+        modal_client: LLMProvider,
+        embedding_provider: EmbeddingProvider,
+        database_url: str,
+        qdrant_url: str,
+        vector_size: int = 1536,
+    ) -> "Agent":
+        """Create an Agent wired for Modal-based providers."""
+        return cls.from_config(
+            config,
+            embedding_provider=embedding_provider,
+            llm_provider=modal_client,
+            database_url=database_url,
+            qdrant_url=qdrant_url,
+            vector_size=vector_size,
+        )
 
     async def run(self, user_id: str, message: str) -> AsyncIterator[AgentEvent]:
         """Execute the agent pipeline and stream events.
