@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "aiagentrag"
-version = "1.1.0"
+version = "1.1.1"
 description = "Reusable AI Agent library with RAG, streaming, and long-term memory"
 authors = ["leonidsliusar <loslyusar@gmail.com>"]
 readme = "README.md"
