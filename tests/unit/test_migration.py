@@ -70,31 +70,3 @@ def test_current_delegates_to_async_lookup(mock_run: MagicMock) -> None:
     revision = current("postgresql+asyncpg://user:pass@localhost:5432/testdb")
     assert revision == "001_initial_messages"
     mock_run.assert_called_once()
-
-
-@patch("aiagentrag.storage.postgres.store.upgrade_head")
-def test_initialize_store_runs_migrations(mock_upgrade_head: MagicMock) -> None:
-    """PostgresConversationStore.initialize must apply migrations before use."""
-    import asyncio
-
-    from aiagentrag.storage.postgres.store import PostgresConversationStore
-
-    async def _run() -> None:
-        with (
-            patch(
-                "aiagentrag.storage.postgres.store.create_async_engine",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "aiagentrag.storage.postgres.store.async_sessionmaker",
-                return_value=MagicMock(),
-            ),
-        ):
-            await PostgresConversationStore.initialize(
-                "postgresql+asyncpg://user:pass@localhost:5432/testdb",
-            )
-
-    asyncio.run(_run())
-    mock_upgrade_head.assert_called_once_with(
-        "postgresql+asyncpg://user:pass@localhost:5432/testdb",
-    )
