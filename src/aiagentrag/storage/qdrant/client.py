@@ -20,8 +20,13 @@ from aiagentrag.storage.qdrant.schema import extract_metadata, extract_text
 class QdrantVectorStore:
     """Vector database implementation using Qdrant."""
 
-    def __init__(self, client: AsyncQdrantClient, vector_size: int) -> None:
-        """Initialize the Qdrant vector store."""
+    def __init__(self, client: AsyncQdrantClient, vector_size: int | None = None) -> None:
+        """Initialize the Qdrant vector store.
+
+        `vector_size` may be None at construction time; callers should set
+        `_vector_size` before attempting to create collections when the real
+        embedding dimensionality is known (e.g. via `agent.init()`).
+        """
         self._client = client
         self._vector_size = vector_size
 
@@ -38,6 +43,12 @@ class QdrantVectorStore:
         try:
             exists = await self._client.collection_exists(collection)
             if not exists:
+                if self._vector_size is None:
+                    msg = (
+                        "Vector size is not set on QdrantVectorStore; cannot create collection. "
+                        "Set vector size before creating collections (e.g. run `agent.init()`)."
+                    )
+                    raise StorageError(msg)
                 await self._client.create_collection(
                     collection_name=collection,
                     vectors_config=VectorParams(

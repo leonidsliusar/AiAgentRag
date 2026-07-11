@@ -72,7 +72,6 @@ class Agent:
         llm_provider: LLMProvider,
         database_url: str,
         qdrant_url: str,
-        vector_size: int = 1536,
     ) -> "Agent":
         """Convenience constructor that wires default implementations synchronously.
 
@@ -97,8 +96,10 @@ class Agent:
         conversation_store = PostgresConversationStore(session_factory)
 
         # Create Qdrant client and vector store (synchronous client construction).
+        # Use a safe default vector size here; `agent.init()` will probe the
+        # real embedding dimensionality and overwrite the store's `_vector_size`.
         qdrant_client = AsyncQdrantClient(url=qdrant_url)
-        vector_store = QdrantVectorStore(qdrant_client, vector_size=vector_size)
+        vector_store = QdrantVectorStore(qdrant_client)
 
         # Wire repository and other components.
         memory_repo = MemoryRepository(
@@ -139,7 +140,6 @@ class Agent:
         embedding_provider: EmbeddingProvider,
         database_url: str,
         qdrant_url: str,
-        vector_size: int = 1536,
     ) -> "Agent":
         """Create an Agent wired for OpenAI-based providers.
 
@@ -153,7 +153,6 @@ class Agent:
             llm_provider=openai_client,
             database_url=database_url,
             qdrant_url=qdrant_url,
-            vector_size=vector_size,
         )
 
     @classmethod
@@ -165,7 +164,6 @@ class Agent:
         embedding_provider: EmbeddingProvider,
         database_url: str,
         qdrant_url: str,
-        vector_size: int = 1536,
     ) -> "Agent":
         """Create an Agent wired for Ollama-based providers."""
         return cls.from_config(
@@ -174,7 +172,6 @@ class Agent:
             llm_provider=ollama_client,
             database_url=database_url,
             qdrant_url=qdrant_url,
-            vector_size=vector_size,
         )
 
     @classmethod
@@ -186,7 +183,6 @@ class Agent:
         embedding_provider: EmbeddingProvider,
         database_url: str,
         qdrant_url: str,
-        vector_size: int = 1536,
     ) -> "Agent":
         """Create an Agent wired for Modal-based providers."""
         return cls.from_config(
@@ -195,8 +191,58 @@ class Agent:
             llm_provider=modal_client,
             database_url=database_url,
             qdrant_url=qdrant_url,
-            vector_size=vector_size,
         )
+
+    async def init(self) -> None:
+        """Perform async initialization tasks.
+
+        This method is responsible for:
+        - probing the embedding provider to determine vector dimensionality,
+        - setting the vector size on all Qdrant vector stores,
+        - creating the knowledge and user-memory collections when missing,
+        - raising clear AgentError on any failure.
+        """
+        try:
+            # Resolve embedding provider from wired components.
+            embedding = getattr(self._memory_repository, "_embedding_provider", None)
+            if embedding is None:
+                embedding = getattr(self._knowledge_retriever, "_embedding_provider", None)
+
+            memory_vector_store = getattr(self._memory_repository, "_vector_store", None)
+            knowledge_vector_store = getattr(self._knowledge_retriever, "_vector_store", None)
+
+            if embedding is None:
+                raise AgentError("Embedding provider is not available for probing vector size.")
+
+            # Probe embedding dimensionality and set it on vector stores.
+            probe = await embedding.embed("dimension probe")
+            if not isinstance(probe, list) or len(probe) == 0:
+                raise AgentError("Failed to determine embedding dimensionality from provider.")
+            vec_size = len(probe)
+
+            for vs in (memory_vector_store, knowledge_vector_store):
+                if vs is None:
+                    continue
+                try:
+                    vs._vector_size = vec_size
+                except Exception as exc:
+                    raise AgentError(f"Failed to set vector size on vector store: {exc}") from exc
+
+            # Create knowledge collection if missing.
+            knowledge_collection = self._config.knowledge_collection
+            if knowledge_vector_store is not None:
+                await knowledge_vector_store.ensure_collection(knowledge_collection)
+
+            # Create user memory collection if missing.
+            user_mem_col = self._config.user_memory_collection
+            if memory_vector_store is not None:
+                await memory_vector_store.ensure_collection(user_mem_col)
+        except AgentError:
+            raise
+        except Exception as exc:
+            raise AgentError(f"Agent initialization failed: {exc}") from exc
+
+    # Note: vector size is determined and applied during `init()`; no separate setter.
 
     async def run(self, user_id: str, message: str) -> AsyncIterator[AgentEvent]:
         """Execute the agent pipeline and stream events.

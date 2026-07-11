@@ -269,93 +269,12 @@ store = await PostgresConversationStore.initialize(DATABASE_URL)
 
 ## 5. Using the library in your project
 
-The library does not start infrastructure. You connect PostgreSQL, Qdrant, and an LLM provider, build an `Agent`, and call `run()`.
-
-Full wiring example: [`scripts/try_agent.py`](scripts/try_agent.py).
-
-Minimal outline:
-
-```python
-import asyncio
-
-from aiagentrag import Agent, AgentConfig, TokenEvent, FinishedEvent, ErrorEvent
-from aiagentrag.knowledge.retriever import KnowledgeRetriever
-from aiagentrag.memory.compressor import ConversationCompressor
-from aiagentrag.memory.repository import MemoryRepository
-from aiagentrag.prompt.builder import PromptBuilder
-from aiagentrag.storage.postgres import PostgresConversationStore
-from aiagentrag.storage.qdrant.client import QdrantVectorStore
-
-# + your LLM provider (Ollama / OpenAI / Modal RPC)
-# + QdrantVectorStore, embedding provider
-
-
-async def main() -> None:
-    config = AgentConfig(
-        system_prompt="You are a helpful assistant.",
-        knowledge_collection="documents",  # vectorizer collection
-    )
-
-    database_url = "postgresql+asyncpg://postgres:postgres@localhost:5432/mydb"
-    conversation_store = await PostgresConversationStore.initialize(database_url)
-
-    # vector_store, embedding, llm — see scripts/try_agent.py
-
-    agent = Agent(
-        config=config,
-        memory_repository=MemoryRepository(conversation_store, vector_store, embedding, config),
-        knowledge_retriever=KnowledgeRetriever(vector_store, embedding, config),
-        prompt_builder=PromptBuilder(config),
-        llm_provider=llm,
-        conversation_compressor=ConversationCompressor(
-            conversation_store, vector_store, embedding, llm, config
-        ),
-    )
-
-    async for event in agent.run(user_id="user-1", message="Hello"):
-        match event:
-            case TokenEvent(content=token):
-                print(token, end="", flush=True)
-            case FinishedEvent(metadata=meta):
-                print(f"\nchunks: {meta.knowledge_chunks_retrieved}")
-            case ErrorEvent(error=err):
-                print(f"Error: {err}")
-
-
-asyncio.run(main())
-```
-
-### DI (optional)
-
-```python
-from aiagentrag import create_container
-
-container = create_container(
-    config=config,
-    embedding_provider=embedding,
-    llm_provider=llm,
-    database_url=database_url,
-    qdrant_url="http://localhost:6333",
-    vector_size=768,
-)
-```
-
-### How to create an Agent (clear, concrete examples)
-
-Short summary: you must provide
-- an EmbeddingProvider (async embed/embed_batch)
-- an LLMProvider (stream(messages) -> AsyncIterator[str], complete(messages) -> str)
-- PostgreSQL URL and Qdrant URL
-
-Important: the synchronous constructors DO NOT run PostgreSQL migrations. Run migrations once manually before production:
-
+### Upgrade migrations
 ```bash
 aiagentrag-migrate upgrade head
 ```
 
-Below are minimal, copy-paste-ready examples for the three supported providers in this package.
-
-1) Ollama (local Ollama server)
+### Ollama (local Ollama server)
 
 ```python
 from aiagentrag.core.models import AgentConfig
@@ -363,35 +282,19 @@ from aiagentrag.agent.agent import Agent
 from aiagentrag.providers.ollama import OllamaEmbeddingProvider, OllamaLLMProvider
 from ollama import AsyncClient
 
-# 1) create Ollama async client (point to your Ollama host)
 ollama_client = AsyncClient(base_url="http://localhost:11434")
-
-# 2) create provider adapters (these implement EmbeddingProvider / LLMProvider)
 embedding = OllamaEmbeddingProvider(ollama_client, model="nomic-embed-text")
 llm = OllamaLLMProvider(ollama_client, model="qwen3:8b")
-
-# 3) Agent config
 cfg = AgentConfig(system_prompt="You are a helpful assistant.")
-
-# 4) Build Agent (synchronous constructor — does NOT run migrations)
 agent = Agent.from_ollama(
     cfg,
-    ollama_client=llm,             # must implement LLMProvider
-    embedding_provider=embedding,  # must implement EmbeddingProvider
+    ollama_client=llm,
+    embedding_provider=embedding,
     database_url="postgresql+asyncpg://postgres:postgres@localhost:5432/aiagentrag",
     qdrant_url="http://localhost:6333",
-    vector_size=1536,
 )
-
-# 5) run (async)
-async for event in agent.run(user_id="local-user", message="Hello"):
-    match event:
-        case TokenEvent(content=tok): print(tok, end="", flush=True)
-        case FinishedEvent(metadata=meta): print("\nDone:", meta)
-        case ErrorEvent(error=err): raise RuntimeError(err)
 ```
-
-2) OpenAI (official async client)
+### OpenAI (official async client)
 
 ```python
 from aiagentrag.providers.openai import OpenAIEmbeddingProvider, OpenAILLMProvider
@@ -403,14 +306,14 @@ llm = OpenAILLMProvider(openai_client, model="gpt-4o-mini")
 
 agent = Agent.from_openai(
     cfg,
-    openai_client=llm,             # OpenAILLMProvider instance (LLMProvider)
-    embedding_provider=embedding,  # OpenAIEmbeddingProvider (EmbeddingProvider)
+    openai_client=llm,
+    embedding_provider=embedding,
     database_url=DATABASE_URL,
     qdrant_url=QDRANT_URL,
 )
 ```
 
-3) Modal RPC (deployed Modal app)
+### Modal RPC (deployed Modal app)
 
 ```python
 from aiagentrag.providers.modal import (
@@ -420,10 +323,9 @@ from aiagentrag.providers.modal import (
     ModalLLMProvider,
 )
 
-# Build Modal RPC config (or use modal_config_from_env())
 rpc_cfg = ModalRpcConfig(
     app_name="aiagentrag-llm",
-    llm_cls="LLMService",           # your deployed class or use functions instead
+    llm_cls="LLMService",
     embed_cls="LLMService",
 )
 rpc = ModalRpcClient(app_name=rpc_cfg.app_name, environment_name=rpc_cfg.environment_name)
@@ -433,34 +335,29 @@ llm = ModalLLMProvider(rpc, rpc_cfg)
 
 agent = Agent.from_modal(
     cfg,
-    modal_client=llm,               # ModalLLMProvider instance (LLMProvider)
-    embedding_provider=embedding,   # ModalEmbeddingProvider (EmbeddingProvider)
+    modal_client=llm,
+    embedding_provider=embedding,
     database_url=DATABASE_URL,
     qdrant_url=QDRANT_URL,
 )
 ```
 
-Exactly-typed signatures
-- Agent.from_ollama(cfg: AgentConfig, *, ollama_client: LLMProvider, embedding_provider: EmbeddingProvider, database_url: str, qdrant_url: str, vector_size: int = 1536) -> Agent
-- Agent.from_openai(cfg: AgentConfig, *, openai_client: LLMProvider, embedding_provider: EmbeddingProvider, database_url: str, qdrant_url: str, vector_size: int = 1536) -> Agent
-- Agent.from_modal(cfg: AgentConfig, *, modal_client: LLMProvider, embedding_provider: EmbeddingProvider, database_url: str, qdrant_url: str, vector_size: int = 1536) -> Agent
-
-If you already have fully constructed components (MemoryRepository, PromptBuilder, etc.) use:
-
+### Client call
 ```python
-agent = Agent.from_components(
-    config=cfg,
-    memory_repository=my_memory_repo,
-    knowledge_retriever=my_knowledge,
-    prompt_builder=my_prompt_builder,
-    llm_provider=my_llm_provider,
-    conversation_compressor=my_compressor,
-)
+async def get_answer(user_id: int, message: str) -> AsyncGenerator[str, None]:
+   await agent.init()
+   async for event in agent.run(user_id=str(user_id), message=message):
+        match event:
+            case TokenEvent(content=tok):
+                yield tok
+            case FinishedEvent(metadata=meta):
+                print("\nDone:", meta)
+                raise StopIteration
+            case ErrorEvent(error=err):
+                raise RuntimeError(err)
 ```
 
-Notes
-- Constructors require objects that satisfy the small protocols in `aiagentrag.core.interfaces`. Use the provider classes in `aiagentrag.providers.*` as drop-in adapters for common setups.
-- Run migrations manually before first production run: `aiagentrag-migrate upgrade head`.
+
 ### Events
 
 `agent.run()` yields an async stream:

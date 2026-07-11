@@ -29,7 +29,7 @@ class AgentProvider(Provider):
         llm_provider: object,
         database_url: str,
         qdrant_url: str,
-        vector_size: int,
+        vector_size: int | None = None,
     ) -> None:
         """Initialize the provider with configuration and connection settings."""
         super().__init__()
@@ -163,7 +163,7 @@ def create_container(
     llm_provider: object,
     database_url: str,
     qdrant_url: str,
-    vector_size: int,
+    vector_size: int | None = None,
 ) -> AsyncContainer:
     """Create a Dishka async container with all agent dependencies wired."""
     provider = AgentProvider(
