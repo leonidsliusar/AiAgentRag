@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.1.2 (2026-07-11)
+
+### Bug Fixes
+
+- Add async init method. Fix Readme
+  ([`b7975f2`](https://github.com/leonidsliusar/AiAgentRag/commit/b7975f22f29a9baa905935e3f305ff2b1b352580))
+
+
 ## v1.1.1 (2026-07-09)
 
 ### Bug Fixes
